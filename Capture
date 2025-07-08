@@ -1,0 +1,68 @@
+import cv2
+import os
+
+# --- CONFIG ---
+DATASET_DIR = "fingers_dataset"
+ESP32_IP = "http://192.168.137.48"
+CAMERA_SOURCE = ESP32_IP + ":81/stream"  # or use 0 for webcam
+
+GESTURE_LABELS = [f"gesture_{i+1}" for i in range(15)]  # gesture_1 to gesture_15
+
+# --- INIT ---
+cap = cv2.VideoCapture(CAMERA_SOURCE)
+if not cap.isOpened():
+    print("❌ Failed to open video source")
+    exit()
+
+# Create folders for gestures
+os.makedirs(DATASET_DIR, exist_ok=True)
+for label in GESTURE_LABELS:
+    os.makedirs(os.path.join(DATASET_DIR, label), exist_ok=True)
+
+print("📸 Press keys 1–9 or q–u to save images for gesture_1 to gesture_15")
+print("⎋ ESC to quit")
+
+# Mapping keys to gesture folders
+key_map = {
+    ord('1'): "gesture_1",
+    ord('2'): "gesture_2",
+    ord('3'): "gesture_3",
+    ord('4'): "gesture_4",
+    ord('5'): "gesture_5",
+    ord('6'): "gesture_6",
+    ord('7'): "gesture_7",
+    ord('8'): "gesture_8",
+    ord('9'): "gesture_9",
+    ord('q'): "gesture_10",
+    ord('w'): "gesture_11",
+    ord('e'): "gesture_12",
+    ord('r'): "gesture_13",
+    ord('t'): "gesture_14",
+    ord('y'): "gesture_15"
+}
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("⚠️ Frame not captured")
+        continue
+
+    frame = cv2.flip(frame, 1)
+    cv2.imshow("Gesture Capture (1-9, q-y)", frame)
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == 27:  # ESC
+        break
+
+    if key in key_map:
+        label = key_map[key]
+        folder_path = os.path.join(DATASET_DIR, label)
+        count = len(os.listdir(folder_path))
+        filename = os.path.join(folder_path, f"{label}_{count+1}.jpg")
+        roi = cv2.resize(frame, (96, 96))
+        cv2.imwrite(filename, roi)
+        print(f"✅ Saved: {filename}")
+
+cap.release()
+cv2.destroyAllWindows()
