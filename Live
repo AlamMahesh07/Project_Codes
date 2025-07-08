@@ -1,0 +1,81 @@
+import cv2
+import numpy as np
+import firebase_admin
+from firebase_admin import credentials, db
+from tensorflow.keras.models import load_model
+
+# --- CONFIGURATION ---
+ESP32_IP = "http://192.168.137.83"   # Replace with your ESP32-CAM IP
+CAMERA_SOURCE = ESP32_IP + ":81/stream"
+MODEL_PATH = "gesture_finger_model.h5"
+FIREBASE_JSON = "service.json"
+FIREBASE_DB_URL = "https://alexa-27be5-default-rtdb.asia-southeast1.firebasedatabase.app/"  # Replace this
+
+# Optional: gesture names
+CLASS_NAMES = [f"Gesture {i+1}" for i in range(15)]
+
+# --- Firebase Initialization ---
+cred = credentials.Certificate(FIREBASE_JSON)
+firebase_admin.initialize_app(cred, {
+    "databaseURL": FIREBASE_DB_URL
+})
+db_ref = db.reference("gesture/song")
+
+# --- Load Gesture Recognition Model ---
+model = load_model(MODEL_PATH)
+
+# --- Start Camera Stream ---
+cap = cv2.VideoCapture(CAMERA_SOURCE)
+if not cap.isOpened():
+    print("❌ Unable to connect to ESP32-CAM stream.")
+    exit()
+
+prev_prediction = -1
+cooldown_frames = 20
+frame_counter = 0
+
+print("🎥 Live gesture recognition started. Press ESC to stop.")
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("⚠️ Frame not received.")
+        continue
+
+    # Preprocess image
+    frame = cv2.flip(frame, 1)
+    roi = cv2.resize(frame, (96, 96))
+    roi_normalized = roi.astype("float32") / 255.0
+    roi_input = np.expand_dims(roi_normalized, axis=0)
+
+    # Predict gesture
+    prediction = model.predict(roi_input, verbose=0)[0]
+    gesture = int(np.argmax(prediction))
+    confidence = float(prediction[gesture])
+
+    # Display prediction
+    label_text = f"{CLASS_NAMES[gesture]} ({confidence:.2f})"
+    display = frame.copy()
+    cv2.putText(display, label_text, (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    # Firebase Update Condition
+    if gesture != prev_prediction and confidence > 0.75 and frame_counter >= cooldown_frames:
+        song_id = gesture + 1  # Songs are 1-indexed
+        try:
+            db_ref.set(song_id)
+            print(f"✅ Firebase updated: gesture/song = {song_id}")
+            prev_prediction = gesture
+            frame_counter = 0
+        except Exception as e:
+            print("❌ Firebase update failed:", e)
+
+    frame_counter += 1
+    cv2.imshow("Gesture Detection", display)
+
+    # Exit on ESC key
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+cap.release()
+cv2.destroyAllWindows()
